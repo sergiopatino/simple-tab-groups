@@ -175,16 +175,21 @@ async function runGrandRestore(restoredWindowIds) {
             const sameGroupsAllWindows = new Map();
 
             // ищем востанавливаемую группу во всех окнах
+            // NOTE: keyed by window id (unique), not group.lastAccessed — lastAccessed
+            // is frequently identical across windows during a bulk session restore
+            // (tabs recreated in the same batch get the same timestamp), which caused
+            // Map.set() to silently overwrite one window's entry and lose its tabs
+            // from reconciliation entirely.
             for (const w of allWindowsMap.values()) {
                 for (const group of w.groups) {
                     if (group.id === groupToKeep.id) {
-                        sameGroupsAllWindows.set(group.lastAccessed, group);
+                        sameGroupsAllWindows.set(w.id, group);
                         break;
                     }
                 }
             }
 
-            glog.log('sameGroupsAllWindows:', Array.from(sameGroupsAllWindows.keys()));
+            glog.log('sameGroupsAllWindows (window ids):', Array.from(sameGroupsAllWindows.keys()));
 
             // если группа из всех окон одна
             if (sameGroupsAllWindows.size === 1) {
@@ -206,13 +211,16 @@ async function runGrandRestore(restoredWindowIds) {
 
             // ищем группу с минимальным значением доступа (это когда она загружена в окне),
             // именно в этом окне она и будет оставлена
-            const minGroupLastAccessed = Math.min(...sameGroupsAllWindows.keys());
+            const minGroupLastAccessed = Math.min(...Array.from(sameGroupsAllWindows.values(), group => group.lastAccessed));
 
-            glog.log('sameGroupsAllWindows:', Array.from(sameGroupsAllWindows.keys()));
+            glog.log('sameGroupsAllWindows lastAccessed values:', Array.from(sameGroupsAllWindows.values(), group => group.lastAccessed));
 
-            groupToKeep = sameGroupsAllWindows.get(minGroupLastAccessed);
+            const keepWindowId = Array.from(sameGroupsAllWindows.entries())
+                .find(([, group]) => group.lastAccessed === minGroupLastAccessed)[0];
 
-            sameGroupsAllWindows.delete(minGroupLastAccessed);
+            groupToKeep = sameGroupsAllWindows.get(keepWindowId);
+
+            sameGroupsAllWindows.delete(keepWindowId);
             const otherSameGroupsAllWindows = sameGroupsAllWindows;
 
             glog.log('groupToKeep lastAccessed', groupToKeep.lastAccessed, ', window', groupToKeep.window.id);
